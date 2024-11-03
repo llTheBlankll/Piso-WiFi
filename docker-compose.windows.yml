@@ -1,0 +1,43 @@
+services:
+  piso_wifi:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_ENV=development
+      - WIFI_INTERFACE="Wi-Fi"
+      - AP_SSID=PisoWiFi
+      - AP_PASSWORD=pisowifi123
+      - RATE_PESOS_PER_MINUTE=0.2
+      - DATABASE_URL=sqlite:///config/piso_wifi.db
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - FLASK_DEBUG=True
+      - LOG_LEVEL=INFO
+      - LOG_FILE=logs/piso_wifi.log
+      - CHECK_INTERVAL=60
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      - DHCP_RANGE_START=172.18.0.2
+      - DHCP_RANGE_END=172.18.0.20
+      - NETWORK_MASK=255.255.255.0
+      - AP_IP=172.18.0.1
+    network_mode: "host"
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp:unconfined
+    privileged: true
+    user: root
+
+networks:
+  piso_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/24

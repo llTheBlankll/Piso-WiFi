@@ -40,6 +40,65 @@ A Python-based PISO WIFI management system designed for Orange Pi One that enabl
 
 ### Quick Start
 
+#### Option 1: Using Docker (Recommended)
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/llTheBlankll/piso-wifi.git
+   cd piso-wifi
+   ```
+
+2. Build the Docker image:
+   ```bash
+   # Build with default tag
+   docker build -t piso-wifi .
+
+   # Or build with version tag
+   docker build -t piso-wifi:1.0 .
+   ```
+
+3. Verify the image was created:
+   ```bash
+   docker images | grep piso-wifi
+   ```
+
+4. Start the container using Docker Compose:
+   ```bash
+   # Start in detached mode
+   docker-compose up -d
+
+   # Or start with logs visible
+   docker-compose up
+   ```
+
+5. Verify the container is running:
+   ```bash
+   docker ps | grep piso-wifi
+   ```
+
+6. Check the logs:
+   ```bash
+   docker-compose logs -f
+   ```
+
+7. Access the application:
+   - Web interface: http://localhost:5000
+   - API endpoint: http://localhost:5000/api/v1
+
+8. Stop the container:
+   ```bash
+   docker-compose down
+   ```
+
+Common Docker Commands:
+- Rebuild after changes: `docker-compose up --build`
+- Remove containers and volumes: `docker-compose down -v`
+- View container logs: `docker-compose logs -f`
+- Shell access: `docker exec -it piso_wifi bash`
+- Check container status: `docker-compose ps`
+
+#### Option 2: Local Development Setup
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/llTheBlankll/piso-wifi.git
@@ -142,3 +201,44 @@ For support and questions:
 - Orange Pi community
 - Contributors and testers
 - Open source projects used in this system
+
+### Windows-Specific Setup
+
+For Windows users, a special Docker configuration is provided that uses bridge networking instead of WiFi interfaces:
+
+1. Make sure you have Docker Desktop for Windows installed and running
+
+2. Use Windows Terminal or PowerShell to run these commands:
+   ```powershell
+   # Clone the repository
+   git clone https://github.com/llTheBlankll/piso-wifi.git
+   cd piso-wifi
+
+   # Start using Windows configuration
+   docker-compose -f docker-compose.windows.yml up -d
+   ```
+
+3. Verify the setup:
+   ```powershell
+   # Check container status
+   docker ps | findstr piso-wifi
+
+   # Check container logs
+   docker-compose -f docker-compose.windows.yml logs -f
+   ```
+
+4. Access the application:
+   - Web interface: http://localhost:5000
+   - API endpoint: http://localhost:5000/api/v1
+
+5. Stop the container:
+   ```powershell
+   docker-compose -f docker-compose.windows.yml down
+   ```
+
+Note: The Windows configuration uses bridge networking instead of direct WiFi interface access. This is suitable for development and testing, but for production deployment, use the Linux configuration on Orange Pi or similar hardware.
+
+Common Issues on Windows:
+- If you get permission errors, make sure Docker Desktop has Windows Defender Firewall access
+- If the container can't start, try restarting Docker Desktop
+- Make sure Hyper-V and WSL2 are properly enabled in Windows features
