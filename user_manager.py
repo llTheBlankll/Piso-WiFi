@@ -1,9 +1,11 @@
 import sqlite3
 from datetime import datetime
+import logging
 
 class UserManager:
     def __init__(self):
         self.db_name = 'piso_wifi.db'
+        self.logger = logging.getLogger(__name__)
     
     def add_time(self, mac_address, amount, minutes):
         conn = sqlite3.connect(self.db_name)
@@ -48,4 +50,23 @@ class UserManager:
             result = c.fetchone()
             return result[0] if result else 0
         finally:
-            conn.close() 
+            conn.close()
+    
+    def deduct_time(self, mac_address, minutes):
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        
+        try:
+            c.execute('''
+                UPDATE users 
+                SET time_balance = MAX(0, time_balance - ?) 
+                WHERE mac_address = ?
+            ''', (minutes, mac_address))
+            conn.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error deducting time: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()

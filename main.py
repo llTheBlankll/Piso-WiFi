@@ -3,6 +3,7 @@ from datetime import datetime
 import sqlite3
 from user_manager import UserManager
 from network_controller import NetworkController
+from time_manager import TimeManager
 
 app = Flask(__name__)
 user_manager = UserManager()
@@ -66,4 +67,6 @@ def add_time():
 
 if __name__ == '__main__':
     init_db()
+    time_manager = TimeManager()
+    time_manager.start()
     app.run(host='0.0.0.0', port=5000, debug=True) 

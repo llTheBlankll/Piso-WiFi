@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  piso_wifi:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_ENV=development
+      - WIFI_INTERFACE=eth0  # Using eth0 for development
+    cap_add:
+      - NET_ADMIN  # Required for iptables
+    networks:
+      - piso_net
+
+networks:
+  piso_net:
+    driver: bridge 
