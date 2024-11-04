@@ -27,7 +27,20 @@
                     <td>{{ device.signal|default('N/A') }}</td>
                     <td>{{ device.time_balance }}</td>
                     <td>
-                        {{ device.plan|title }}
+                        {% if device.plan == 'premium' %}
+                            <span class="badge bg-success">Premium</span>
+                            <small class="text-muted d-block">
+                                Download: {{ device.download_limit }}kbps<br>
+                                Upload: {{ device.upload_limit }}kbps<br>
+                                <em>Note: Reconnect to WiFi if speed hasn't updated</em>
+                            </small>
+                        {% else %}
+                            <span class="badge bg-secondary">Default</span>
+                            <small class="text-muted d-block">
+                                Download: {{ device.download_limit }}kbps<br>
+                                Upload: {{ device.upload_limit }}kbps
+                            </small>
+                        {% endif %}
                         {% if device.upgrade_requested %}
                             <span class="badge bg-warning">Upgrade Requested</span>
                         {% endif %}

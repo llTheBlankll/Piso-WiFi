@@ -255,13 +255,20 @@ def manage_plan():
         mac_address = request.form.get('mac_address')
         new_plan = request.form.get('plan')
         
-        # First remove existing bandwidth limits
-        network_controller.remove_bandwidth_limit(mac_address)
-        
-        # Update plan and speeds
+        # Get current plan info first
         conn = sqlite3.connect(user_manager.db_path)
         c = conn.cursor()
+        c.execute('SELECT plan FROM users WHERE mac_address = ?', (mac_address,))
+        current_plan = c.fetchone()
         
+        if current_plan and current_plan[0] == new_plan:
+            flash('Device is already on this plan', 'info')
+            return redirect(url_for('index'))
+        
+        # Remove existing bandwidth limits
+        network_controller.remove_bandwidth_limit(mac_address)
+        
+        # Set new speeds based on plan
         if new_plan == 'premium':
             download_speed = network_controller.PREMIUM_DOWNLOAD_SPEED
             upload_speed = network_controller.PREMIUM_UPLOAD_SPEED
@@ -269,6 +276,7 @@ def manage_plan():
             download_speed = network_controller.DEFAULT_DOWNLOAD_SPEED
             upload_speed = network_controller.DEFAULT_UPLOAD_SPEED
             
+        # Update database first
         c.execute('''
             UPDATE users 
             SET plan = ?,
@@ -281,11 +289,14 @@ def manage_plan():
         conn.commit()
         conn.close()
         
-        # Apply new bandwidth limits with verification
+        # Apply new bandwidth limits
         if network_controller.set_bandwidth_limit(mac_address, download_speed, upload_speed):
-            flash(f'Plan updated to {new_plan} with new bandwidth limits', 'success')
+            flash(f'Plan updated to {new_plan}. New speeds: {download_speed}kbps down / {upload_speed}kbps up', 'success')
         else:
-            flash(f'Plan updated to {new_plan} but bandwidth limits may not be applied correctly', 'warning')
+            flash(f'Plan updated but there was an issue applying bandwidth limits', 'warning')
+            
+        # Log the change
+        logger.info(f"Updated plan for {mac_address} to {new_plan} with speeds: {download_speed}/{upload_speed}")
         
         return redirect(url_for('index'))
     except Exception as e:

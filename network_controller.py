@@ -15,6 +15,12 @@ class NetworkController:
             self.logger = logging.getLogger(__name__)
             self.logger.info("Initializing Network Controller...")
             
+            # Bandwidth plans (define these FIRST)
+            self.DEFAULT_DOWNLOAD_SPEED = 2048  # 2 Mbps
+            self.DEFAULT_UPLOAD_SPEED = 1024    # 1 Mbps
+            self.PREMIUM_DOWNLOAD_SPEED = 8096  # 8 Mbps
+            self.PREMIUM_UPLOAD_SPEED = 8096    # 8 Mbps
+            
             # Get environment variables
             self.ap_interface = os.getenv('WIFI_INTERFACE', 'wlan0')
             self.internet_interface = os.getenv('INTERNET_INTERFACE', 'wlan1')
@@ -50,18 +56,8 @@ class NetworkController:
             
             self.logger.info("Network Controller initialized successfully")
             
-            # Default bandwidth limits (in kbps)
-            self.default_download = 2048  # 2 Mbps
-            self.default_upload = 1024     # 1 Mbps
-            
-            # Set up QoS
+            # Set up QoS after everything else is initialized
             self._setup_qos()
-            
-            # Bandwidth plans
-            self.DEFAULT_DOWNLOAD_SPEED = 2048  # 2 Mbps
-            self.DEFAULT_UPLOAD_SPEED = 1024     # 1 Mbps
-            self.PREMIUM_DOWNLOAD_SPEED = 8096  # 8 Mbps
-            self.PREMIUM_UPLOAD_SPEED = 8096    # 8 Mbps
             
         except Exception as e:
             self.logger.error(f"Failed to initialize Network Controller: {e}")
@@ -581,15 +577,19 @@ log-dhcp
         try:
             # Clear existing rules
             self._execute_command(f"tc qdisc del dev {self.ap_interface} root", ignore_errors=True)
+            self._execute_command(f"tc qdisc del dev {self.ap_interface} ingress", ignore_errors=True)
             
             # Create HTB qdisc
             self._execute_command(f"tc qdisc add dev {self.ap_interface} root handle 1: htb default 10")
             
-            # Create main class with total bandwidth
-            self._execute_command(f"tc class add dev {self.ap_interface} parent 1: classid 1:1 htb rate 100mbit")
+            # Create main class with total bandwidth (100Mbit)
+            self._execute_command(f"tc class add dev {self.ap_interface} parent 1: classid 1:1 htb rate 100mbit burst 15k")
             
-            # Create default class
-            self._execute_command(f"tc class add dev {self.ap_interface} parent 1:1 classid 1:10 htb rate {self.default_download}kbit ceil {self.default_download}kbit")
+            # Create default class for unclassified traffic
+            self._execute_command(f"tc class add dev {self.ap_interface} parent 1:1 classid 1:10 htb rate {self.DEFAULT_DOWNLOAD_SPEED}kbit ceil {self.DEFAULT_DOWNLOAD_SPEED}kbit burst 15k")
+            
+            # Add ingress qdisc for upload control
+            self._execute_command(f"tc qdisc add dev {self.ap_interface} ingress")
             
             self.logger.info("QoS rules initialized")
         except Exception as e:
@@ -600,29 +600,48 @@ log-dhcp
         """Set bandwidth limits for a specific MAC address"""
         try:
             if download_kbps is None:
-                download_kbps = self.default_download
+                download_kbps = self.DEFAULT_DOWNLOAD_SPEED
             if upload_kbps is None:
-                upload_kbps = self.default_upload
+                upload_kbps = self.DEFAULT_UPLOAD_SPEED
+
+            # Get IP address for the MAC
+            ip_address = None
+            arp_output = self._execute_command("arp -n")
+            for line in arp_output.splitlines():
+                if mac_address.lower() in line.lower():
+                    ip_address = line.split()[0]
+                    break
+                    
+            if not ip_address:
+                self.logger.error(f"Could not find IP address for MAC {mac_address}")
+                return False
 
             # Generate a unique class ID based on MAC address
             mac_hex = mac_address.replace(':', '')
             class_id = int(mac_hex[-4:], 16) % 1000 + 20  # Range 20-1019
             
-            # Remove existing rules for this MAC
-            self._execute_command(f"tc filter del dev {self.ap_interface} parent 1: protocol ip prio 1 handle {class_id} fw", ignore_errors=True)
-            self._execute_command(f"tc class del dev {self.ap_interface} classid 1:{class_id}", ignore_errors=True)
+            # Remove existing rules first
+            self.remove_bandwidth_limit(mac_address)
             
-            # Create bandwidth class
-            self._execute_command(f"tc class add dev {self.ap_interface} parent 1:1 classid 1:{class_id} htb rate {download_kbps}kbit ceil {download_kbps}kbit")
+            # Create HTB class for this client
+            self._execute_command(f"tc class add dev {self.ap_interface} parent 1:1 classid 1:{class_id} htb rate {download_kbps}kbit ceil {download_kbps}kbit burst 15k")
             
-            # Add filter to match MAC address
-            self._execute_command(f"tc filter add dev {self.ap_interface} parent 1: protocol ip prio 1 u32 match u16 0x0800 0xFFFF at -2 match u32 0x{mac_hex} 0xFFFFFFFF at -12 flowid 1:{class_id}")
+            # Add fair queuing
+            self._execute_command(f"tc qdisc add dev {self.ap_interface} parent 1:{class_id} handle {class_id}: sfq perturb 10")
             
-            # Add upload limit using iptables
-            self._execute_command(f"iptables -t mangle -D POSTROUTING -m mac --mac-source {mac_address} -j MARK --set-mark {class_id}", ignore_errors=True)
-            self._execute_command(f"iptables -t mangle -A POSTROUTING -m mac --mac-source {mac_address} -j MARK --set-mark {class_id}")
+            # Add filters using IP instead of MAC for better compatibility
+            self._execute_command(f"tc filter add dev {self.ap_interface} parent 1: protocol ip prio 1 u32 match ip dst {ip_address} flowid 1:{class_id}")
+            self._execute_command(f"tc filter add dev {self.ap_interface} parent 1: protocol ip prio 1 u32 match ip src {ip_address} flowid 1:{class_id}")
             
-            self.logger.info(f"Set bandwidth limits for {mac_address}: Download={download_kbps}kbps, Upload={upload_kbps}kbps")
+            # Add upload limit using ingress
+            self._execute_command(f"tc filter add dev {self.ap_interface} parent ffff: protocol ip prio 1 u32 match ip src {ip_address} police rate {upload_kbps}kbit burst 15k drop flowid :1")
+            
+            # Ensure forwarding is enabled for the client
+            self._execute_command(f"iptables -A FORWARD -s {ip_address} -j ACCEPT")
+            self._execute_command(f"iptables -A FORWARD -d {ip_address} -j ACCEPT")
+            
+            self.logger.info(f"Set bandwidth limits for {mac_address} ({ip_address}): Download={download_kbps}kbps, Upload={upload_kbps}kbps")
+            
             return True
         except Exception as e:
             self.logger.error(f"Error setting bandwidth limit for {mac_address}: {e}")
@@ -631,15 +650,29 @@ log-dhcp
     def remove_bandwidth_limit(self, mac_address):
         """Remove bandwidth limits for a MAC address"""
         try:
+            # Get IP address
+            ip_address = None
+            arp_output = self._execute_command("arp -n")
+            for line in arp_output.splitlines():
+                if mac_address.lower() in line.lower():
+                    ip_address = line.split()[0]
+                    break
+
             mac_hex = mac_address.replace(':', '')
             class_id = int(mac_hex[-4:], 16) % 1000 + 20
             
             # Remove tc rules
-            self._execute_command(f"tc filter del dev {self.ap_interface} parent 1: protocol ip prio 1 handle {class_id} fw", ignore_errors=True)
+            self._execute_command(f"tc filter del dev {self.ap_interface} parent 1: protocol ip prio 1", ignore_errors=True)
             self._execute_command(f"tc class del dev {self.ap_interface} classid 1:{class_id}", ignore_errors=True)
+            self._execute_command(f"tc qdisc del dev {self.ap_interface} parent 1:{class_id}", ignore_errors=True)
             
-            # Remove iptables marks
-            self._execute_command(f"iptables -t mangle -D POSTROUTING -m mac --mac-source {mac_address} -j MARK --set-mark {class_id}", ignore_errors=True)
+            if ip_address:
+                # Remove ingress filters
+                self._execute_command(f"tc filter del dev {self.ap_interface} parent ffff: protocol ip prio 1 u32 match ip src {ip_address}", ignore_errors=True)
+                
+                # Remove iptables rules
+                self._execute_command(f"iptables -D FORWARD -s {ip_address} -j ACCEPT", ignore_errors=True)
+                self._execute_command(f"iptables -D FORWARD -d {ip_address} -j ACCEPT", ignore_errors=True)
             
             self.logger.info(f"Removed bandwidth limits for {mac_address}")
             return True
