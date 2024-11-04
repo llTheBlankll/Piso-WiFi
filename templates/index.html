@@ -14,6 +14,7 @@
                     <th>IP Address</th>
                     <th>Signal</th>
                     <th>Time Balance (minutes)</th>
+                    <th>Plan</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -26,11 +27,48 @@
                     <td>{{ device.signal|default('N/A') }}</td>
                     <td>{{ device.time_balance }}</td>
                     <td>
-                        <form action="/add_time" method="POST" class="d-inline">
-                            <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
-                            <input type="number" name="amount" placeholder="Amount (Pesos)" class="form-control d-inline" style="width: 150px;">
-                            <button type="submit" class="btn btn-primary">Add Time</button>
-                        </form>
+                        {{ device.plan|title }}
+                        {% if device.upgrade_requested %}
+                            <span class="badge bg-warning">Upgrade Requested</span>
+                        {% endif %}
+                        <br>
+                        <small class="text-muted">
+                            Download: {{ device.download_limit }}kbps<br>
+                            Upload: {{ device.upload_limit }}kbps
+                        </small>
+                    </td>
+                    <td>
+                        <div class="btn-group-vertical">
+                            <form action="/add_time" method="POST" class="mb-2">
+                                <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
+                                <input type="number" name="amount" placeholder="Amount (Pesos)" class="form-control d-inline" style="width: 150px;">
+                                <button type="submit" class="btn btn-primary">Add Time</button>
+                            </form>
+                            
+                            <form action="/deduct_time" method="POST" class="mb-2">
+                                <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
+                                <input type="number" name="minutes" placeholder="Minutes" class="form-control d-inline" style="width: 100px;">
+                                <button type="submit" class="btn btn-warning">Deduct Time</button>
+                            </form>
+
+                            {% if device.plan == 'default' and not device.upgrade_requested %}
+                            <form action="/request_upgrade" method="POST">
+                                <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
+                                <button type="submit" class="btn btn-success">Request Premium Upgrade</button>
+                            </form>
+                            {% endif %}
+
+                            {% if is_admin %}
+                            <form action="/manage_plan" method="POST" class="mt-2">
+                                <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
+                                <select name="plan" class="form-select d-inline" style="width: 150px;">
+                                    <option value="default" {% if device.plan == 'default' %}selected{% endif %}>Default</option>
+                                    <option value="premium" {% if device.plan == 'premium' %}selected{% endif %}>Premium</option>
+                                </select>
+                                <button type="submit" class="btn btn-info">Update Plan</button>
+                            </form>
+                            {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}

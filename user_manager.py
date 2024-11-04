@@ -19,7 +19,7 @@ class UserManager:
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         try:
-            # Users table
+            # Users table with bandwidth fields and plan
             c.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,7 +27,11 @@ class UserManager:
                     time_balance REAL DEFAULT 0,
                     status TEXT DEFAULT 'inactive',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_deduction TIMESTAMP
+                    last_deduction TIMESTAMP,
+                    download_limit INTEGER DEFAULT 1024,
+                    upload_limit INTEGER DEFAULT 512,
+                    plan TEXT DEFAULT 'default',
+                    upgrade_requested BOOLEAN DEFAULT 0
                 )
             ''')
             
@@ -43,7 +47,7 @@ class UserManager:
                 )
             ''')
             
-            # Time logs table
+            # Time logs table with deduction_type
             c.execute('''
                 CREATE TABLE IF NOT EXISTS time_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +57,7 @@ class UserManager:
                     balance_before REAL,
                     balance_after REAL,
                     deducted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    deduction_type TEXT DEFAULT 'auto',
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             ''')
@@ -114,7 +119,7 @@ class UserManager:
         finally:
             conn.close()
     
-    def deduct_time(self, mac_address, minutes):
+    def deduct_time(self, mac_address, minutes, manual=False):
         """Deduct time from user's balance and handle zero balance"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
@@ -151,9 +156,10 @@ class UserManager:
                     minutes_deducted, 
                     balance_before,
                     balance_after,
-                    deducted_at
-                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (user_id, mac_address, minutes, current_balance, new_balance))
+                    deducted_at,
+                    deduction_type
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            ''', (user_id, mac_address, minutes, current_balance, new_balance, 'manual' if manual else 'auto'))
             
             conn.commit()
             self.logger.info(f"Deducted {minutes} minutes from {mac_address}. Balance: {current_balance} -> {new_balance}")
@@ -178,3 +184,25 @@ class UserManager:
         except Exception as e:
             self.logger.error(f"Database health check failed: {e}")
             return False
+    
+    def set_bandwidth(self, mac_address, download_kbps, upload_kbps):
+        """Set bandwidth limits for a user"""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        
+        try:
+            c.execute('''
+                UPDATE users 
+                SET download_limit = ?,
+                    upload_limit = ?
+                WHERE mac_address = ?
+            ''', (download_kbps, upload_kbps, mac_address))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error setting bandwidth: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()

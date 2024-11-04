@@ -10,10 +10,29 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="/">PISO WIFI</a>
+            <div class="navbar-nav ms-auto">
+                {% if session.get('is_admin') %}
+                    <span class="nav-item nav-link text-light">Admin</span>
+                    <a class="nav-item nav-link" href="{{ url_for('logout') }}">Logout</a>
+                {% else %}
+                    <a class="nav-item nav-link" href="{{ url_for('login') }}">Admin Login</a>
+                {% endif %}
+            </div>
         </div>
     </nav>
 
     <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
         {% block content %}{% endblock %}
     </div>
 
