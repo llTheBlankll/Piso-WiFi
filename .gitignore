@@ -1,2 +1,4 @@
 .venv
 piso_wifi/piso_wifi.db
+venv
+.env

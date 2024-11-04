@@ -4,42 +4,32 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title">Connected Devices</h5>
-            </div>
-            <div class="card-body">
-                <ul class="list-group">
-                    {% for device in devices %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        {{ device.mac_address }}
-                        <span class="badge bg-primary rounded-pill">{{ device.time_balance }} min</span>
-                    </li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title">Add Time</h5>
-            </div>
-            <div class="card-body">
-                <form method="POST" action="/add_time">
-                    <div class="mb-3">
-                        <label for="mac_address" class="form-label">MAC Address</label>
-                        <input type="text" class="form-control" id="mac_address" name="mac_address" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="amount" class="form-label">Amount (Piso)</label>
-                        <input type="number" class="form-control" id="amount" name="amount" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Add Time</button>
-                </form>
-            </div>
-        </div>
+    <div class="col-md-12">
+        <h2>Connected Devices</h2>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>MAC Address</th>
+                    <th>Time Balance (minutes)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in devices %}
+                <tr>
+                    <td>{{ device.mac_address }}</td>
+                    <td>{{ device.time_balance }}</td>
+                    <td>
+                        <form action="/add_time" method="POST" class="d-inline">
+                            <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
+                            <input type="number" name="amount" placeholder="Amount (Pesos)" class="form-control d-inline" style="width: 150px;">
+                            <button type="submit" class="btn btn-primary">Add Time</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %} 

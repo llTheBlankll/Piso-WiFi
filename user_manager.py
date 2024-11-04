@@ -126,3 +126,15 @@ class UserManager:
             return False
         finally:
             conn.close()
+    
+    def check_health(self):
+        """Check if database is accessible"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute('SELECT 1')
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"Database health check failed: {e}")
+            return False
