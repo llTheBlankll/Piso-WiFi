@@ -44,7 +44,8 @@ apt-get install -y \
     pkg-config \
     dnsmasq \
     hostapd \
-    linux-headers-$(uname -r)
+    linux-headers-$(uname -r) \
+    conntrack
 
 # Select interfaces
 list_interfaces

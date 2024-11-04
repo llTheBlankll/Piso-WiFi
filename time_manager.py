@@ -6,7 +6,7 @@ from user_manager import UserManager
 from network_controller import NetworkController
 
 class TimeManager:
-    def __init__(self, check_interval=60):  # Check every minute
+    def __init__(self, check_interval=30):  # Check every 30 seconds
         self.user_manager = UserManager()
         self.network_controller = NetworkController()
         self.check_interval = check_interval
@@ -32,6 +32,7 @@ class TimeManager:
                 time.sleep(self.check_interval)
             except Exception as e:
                 self.logger.error(f"Error in time deduction: {e}")
+                time.sleep(1)
 
     def _check_and_deduct_time(self):
         connected_devices = self.network_controller.get_connected_devices()
@@ -41,5 +42,5 @@ class TimeManager:
                 self.network_controller.block_mac(mac)
                 self.logger.info(f"Blocked {mac} due to zero balance")
             else:
-                # Deduct 1 minute
-                self.user_manager.deduct_time(mac, 1) 
+                # Deduct 0.5 minutes (30 seconds)
+                self.user_manager.deduct_time(mac, 0.5)

@@ -98,7 +98,7 @@ class NetworkController:
             # Create hostapd directory if it doesn't exist
             os.makedirs('/etc/hostapd', exist_ok=True)
             
-            # Configure hostapd with enhanced settings and debugging
+            # Configure hostapd with open network settings
             hostapd_config = f"""
 # Interface configuration
 interface={self.ap_interface}
@@ -109,46 +109,32 @@ ssid={self.ssid}
 hw_mode=g
 channel=7
 ieee80211n=1
-country_code=US
+wmm_enabled=0
 
-# Basic authentication settings
+# Open network configuration
 auth_algs=1
 ignore_broadcast_ssid=0
-
-# WPA2 configuration
-wpa=2
-wpa_passphrase={self.password}
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=CCMP
-rsn_pairwise=CCMP
 
 # Debugging
 logger_syslog=-1
 logger_syslog_level=2
 logger_stdout=-1
 logger_stdout_level=2
-debug=4
-dump_file=/tmp/hostapd.dump
+
+# Stability settings
+beacon_int=100
+dtim_period=2
+max_num_sta=10
+rts_threshold=2347
+fragm_threshold=2346
 """
-            # Write hostapd configuration with proper permissions
+            # Write hostapd configuration
             with open(self.hostapd_conf, 'w') as f:
                 f.write(hostapd_config.strip())
             
             # Set proper ownership and permissions
             self._execute_command(f"chown root:root {self.hostapd_conf}")
             self._execute_command(f"chmod 644 {self.hostapd_conf}")
-            
-            # Skip the hostapd test as it can hang
-            # Instead, verify the configuration file exists and is readable
-            if not os.path.isfile(self.hostapd_conf):
-                raise Exception("Hostapd configuration file not created")
-            
-            if not os.access(self.hostapd_conf, os.R_OK):
-                raise Exception("Hostapd configuration file not readable")
-            
-            # Update hostapd default configuration
-            with open('/etc/default/hostapd', 'w') as f:
-                f.write(f'DAEMON_CONF="{self.hostapd_conf}"\n')
             
             # Configure dnsmasq
             dnsmasq_config = f"""
@@ -173,11 +159,7 @@ server=8.8.4.4
 log-queries
 log-dhcp
 """
-            # Backup original dnsmasq config if it exists
-            if os.path.exists(self.dnsmasq_conf):
-                self._execute_command(f"cp {self.dnsmasq_conf} {self.dnsmasq_conf}.backup")
-            
-            # Write dnsmasq configuration with proper permissions
+            # Write dnsmasq configuration
             with open(self.dnsmasq_conf, 'w') as f:
                 f.write(dnsmasq_config.strip())
             
@@ -485,7 +467,7 @@ log-dhcp
             self._execute_command(f"iptables -D FORWARD -m mac --mac-source {mac_address} -j ACCEPT", ignore_errors=True)
             self._execute_command(f"iptables -D FORWARD -m mac --mac-source {mac_address} -j DROP", ignore_errors=True)
             
-            # Add explicit DROP rule
+            # Add block rule
             self._execute_command(f"iptables -I FORWARD 1 -m mac --mac-source {mac_address} -j DROP")
             self.logger.info(f"Blocked MAC address: {mac_address}")
             return True
@@ -500,7 +482,7 @@ log-dhcp
             self._execute_command(f"iptables -D FORWARD -m mac --mac-source {mac_address} -j ACCEPT", ignore_errors=True)
             self._execute_command(f"iptables -D FORWARD -m mac --mac-source {mac_address} -j DROP", ignore_errors=True)
             
-            # Add allow rule before the default DROP
+            # Add allow rule
             self._execute_command(f"iptables -I FORWARD 1 -m mac --mac-source {mac_address} -j ACCEPT")
             self.logger.info(f"Unblocked MAC address: {mac_address}")
             return True
