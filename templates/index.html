@@ -10,6 +10,9 @@
             <thead>
                 <tr>
                     <th>MAC Address</th>
+                    <th>Hostname</th>
+                    <th>IP Address</th>
+                    <th>Signal</th>
                     <th>Time Balance (minutes)</th>
                     <th>Actions</th>
                 </tr>
@@ -18,6 +21,9 @@
                 {% for device in devices %}
                 <tr>
                     <td>{{ device.mac_address }}</td>
+                    <td>{{ device.hostname }}</td>
+                    <td>{{ device.ip }}</td>
+                    <td>{{ device.signal|default('N/A') }}</td>
                     <td>{{ device.time_balance }}</td>
                     <td>
                         <form action="/add_time" method="POST" class="d-inline">

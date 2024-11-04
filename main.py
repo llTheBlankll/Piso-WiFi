@@ -56,31 +56,19 @@ def init_services():
         logger.error(f"Error initializing services: {e}")
         raise
 
-def start_connection_monitor(network_controller):
-    """Start the connection monitoring thread"""
-    logger.info("Starting connection monitor...")
-    monitor_thread = threading.Thread(target=network_controller.monitor_connections)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-    logger.info("Connection monitor started")
-
 @app.route('/')
 def index():
     try:
         logger.debug("Getting connected devices...")
-        connected_macs = network_controller.get_connected_devices()
-        logger.debug(f"Found devices: {connected_macs}")
+        connected_devices = network_controller.get_connected_devices()
+        logger.debug(f"Found devices: {connected_devices}")
         
-        devices = []
-        for mac in connected_macs:
-            balance = user_manager.check_balance(mac)
-            devices.append({
-                'mac_address': mac,
-                'time_balance': balance
-            })
+        # Add time balance to each device
+        for device in connected_devices:
+            device['time_balance'] = user_manager.check_balance(device['mac_address'])
         
-        logger.debug(f"Devices with balance: {devices}")
-        return render_template('index.html', devices=devices)
+        logger.debug(f"Devices with balance: {connected_devices}")
+        return render_template('index.html', devices=connected_devices)
     except Exception as e:
         logger.error(f"Error in index route: {e}")
         return "Internal Server Error", 500
@@ -136,10 +124,9 @@ if __name__ == '__main__':
         # Initialize services
         user_manager, network_controller, time_manager = init_services()
         
-        # Start background services
-        logger.info("Starting background services...")
+        # Start time manager only (it handles connection monitoring)
+        logger.info("Starting time manager...")
         time_manager.start()
-        start_connection_monitor(network_controller)
         
         # Start Flask application
         logger.info("Starting web server...")

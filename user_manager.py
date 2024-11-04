@@ -15,40 +15,53 @@ class UserManager:
         self._init_db()
     
     def _init_db(self):
-        """Initialize database tables if they don't exist"""
+        """Initialize database tables"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        
         try:
-            # Create users table
+            # Users table
             c.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     mac_address TEXT UNIQUE,
-                    time_balance INTEGER DEFAULT 0,
+                    time_balance REAL DEFAULT 0,
                     status TEXT DEFAULT 'inactive',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_deduction TIMESTAMP
                 )
             ''')
             
-            # Create transactions table
+            # Transactions table
             c.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
-                    amount INTEGER,
+                    amount REAL,
                     minutes INTEGER,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            ''')
+            
+            # Time logs table
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS time_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    mac_address TEXT,
+                    minutes_deducted REAL,
+                    balance_before REAL,
+                    balance_after REAL,
+                    deducted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             ''')
             
             conn.commit()
-            self.logger.info("Database initialized successfully")
-            
         except Exception as e:
             self.logger.error(f"Error initializing database: {e}")
             conn.rollback()
+            raise
         finally:
             conn.close()
     
@@ -102,24 +115,51 @@ class UserManager:
             conn.close()
     
     def deduct_time(self, mac_address, minutes):
+        """Deduct time from user's balance and handle zero balance"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         
         try:
-            # Update balance and status if balance becomes 0
+            # First check current balance
+            c.execute('SELECT id, time_balance FROM users WHERE mac_address = ?', (mac_address,))
+            result = c.fetchone()
+            
+            if not result:
+                self.logger.warning(f"No user found for MAC {mac_address}")
+                return False
+                
+            user_id, current_balance = result
+            new_balance = max(0, current_balance - minutes)
+            
+            # Update balance and status
             c.execute('''
                 UPDATE users 
-                SET time_balance = MAX(0, time_balance - ?),
+                SET time_balance = ?,
                     status = CASE 
-                        WHEN time_balance - ? <= 0 THEN 'inactive'
+                        WHEN ? <= 0 THEN 'inactive'
                         ELSE 'active'
-                    END
+                    END,
+                    last_deduction = CURRENT_TIMESTAMP
                 WHERE mac_address = ?
-            ''', (minutes, minutes, mac_address))
+            ''', (new_balance, new_balance, mac_address))
+            
+            # Log the deduction
+            c.execute('''
+                INSERT INTO time_logs (
+                    user_id,
+                    mac_address, 
+                    minutes_deducted, 
+                    balance_before,
+                    balance_after,
+                    deducted_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (user_id, mac_address, minutes, current_balance, new_balance))
             
             conn.commit()
-            self.logger.debug(f"Deducted {minutes} minutes from MAC {mac_address}")
+            self.logger.info(f"Deducted {minutes} minutes from {mac_address}. Balance: {current_balance} -> {new_balance}")
+            
             return True
+            
         except Exception as e:
             self.logger.error(f"Error deducting time: {e}")
             conn.rollback()

@@ -334,46 +334,12 @@ log-dhcp
             self.logger.error(f"Failed to stop WiFi Access Point: {e}")
 
     def get_connected_devices(self):
-        """Get list of connected devices using multiple methods"""
+        """Get list of connected devices with detailed information"""
         try:
-            connected = set()
+            connected_devices = []
             
-            # Method 1: Direct hostapd client list
-            try:
-                result = self._execute_command("hostapd_cli all_sta")
-                if result:
-                    # Parse hostapd client list
-                    for line in result.split('\n'):
-                        if line.strip():
-                            mac = line.split()[0].upper()
-                            if self._is_valid_mac(mac):
-                                connected.add(mac)
-                                self.logger.debug(f"Hostapd found client: {mac}")
-                self.logger.debug(f"Hostapd clients found: {connected}")
-            except Exception as e:
-                self.logger.warning(f"Hostapd client list failed: {e}")
-
-            # Method 2: Monitor interface packets
-            try:
-                result = self._execute_command(f"iw dev {self.ap_interface} station dump")
-                for line in result.split('\n'):
-                    if "Station" in line:
-                        mac = line.split()[1].upper()
-                        if self._is_valid_mac(mac):
-                            connected.add(mac)
-                            # Get additional station info
-                            try:
-                                info = self._execute_command(f"iw dev {self.ap_interface} station get {mac}")
-                                signal = re.search(r"signal:\s*([-\d]+)\s*dBm", info)
-                                if signal:
-                                    self.logger.debug(f"Client {mac} signal strength: {signal.group(1)}dBm")
-                            except Exception as e:
-                                self.logger.debug(f"Could not get signal info for {mac}: {e}")
-                self.logger.debug(f"IW station dump found: {connected}")
-            except Exception as e:
-                self.logger.warning(f"IW station dump failed: {e}")
-
-            # Method 3: Check active DHCP leases
+            # Get DHCP leases first for hostname and IP information
+            dhcp_info = {}
             try:
                 leases_file = "/var/lib/misc/dnsmasq.leases"
                 if os.path.exists(leases_file):
@@ -385,22 +351,52 @@ log-dhcp
                                 lease_expiry = int(parts[0])
                                 mac = parts[1].upper()
                                 ip = parts[2]
-                                hostname = parts[3]
+                                hostname = parts[3] if parts[3] != '*' else 'Unknown'
                                 
                                 # Only include active leases in our subnet
-                                if (lease_expiry > current_time and 
-                                    ip.startswith("192.168.4.") and 
-                                    self._is_valid_mac(mac)):
-                                    connected.add(mac)
-                                    self.logger.debug(f"Active lease found - MAC: {mac}, IP: {ip}, Hostname: {hostname}")
-                self.logger.debug(f"DHCP leases found: {connected}")
+                                if lease_expiry > current_time and ip.startswith("192.168.4."):
+                                    dhcp_info[mac] = {
+                                        'ip': ip,
+                                        'hostname': hostname,
+                                        'lease_expiry': lease_expiry
+                                    }
+                self.logger.debug(f"DHCP info found: {dhcp_info}")
             except Exception as e:
                 self.logger.warning(f"DHCP leases check failed: {e}")
 
+            # Get currently connected devices
+            try:
+                result = self._execute_command(f"iw dev {self.ap_interface} station dump")
+                for line in result.split('\n'):
+                    if "Station" in line:
+                        mac = line.split()[1].upper()
+                        if self._is_valid_mac(mac):
+                            device_info = {
+                                'mac_address': mac,
+                                'ip': dhcp_info.get(mac, {}).get('ip', 'Unknown'),
+                                'hostname': dhcp_info.get(mac, {}).get('hostname', 'Unknown'),
+                                'connected': True
+                            }
+                            
+                            # Get signal strength and other stats
+                            try:
+                                info = self._execute_command(f"iw dev {self.ap_interface} station get {mac}")
+                                signal = re.search(r"signal:\s*([-\d]+)\s*dBm", info)
+                                if signal:
+                                    device_info['signal'] = f"{signal.group(1)} dBm"
+                            except Exception as e:
+                                self.logger.debug(f"Could not get signal info for {mac}: {e}")
+                            
+                            connected_devices.append(device_info)
+                            
+                self.logger.debug(f"Connected devices with info: {connected_devices}")
+            except Exception as e:
+                self.logger.warning(f"IW station dump failed: {e}")
+
             # Update connected devices set
-            current_devices = connected
-            new_devices = current_devices - self.connected_devices
-            disconnected_devices = self.connected_devices - current_devices
+            current_macs = {device['mac_address'] for device in connected_devices}
+            new_devices = current_macs - self.connected_devices
+            disconnected_devices = self.connected_devices - current_macs
 
             # Log new connections and disconnections
             for mac in new_devices:
@@ -413,13 +409,11 @@ log-dhcp
                 self.logger.info(f"Device disconnected: {mac}")
 
             # Update connected devices
-            self.connected_devices = current_devices
+            self.connected_devices = current_macs
 
             # Debug output
-            self.logger.info(f"Total connected devices: {len(current_devices)}")
-            self.logger.debug(f"Connected devices: {current_devices}")
-
-            return list(current_devices)
+            self.logger.info(f"Total connected devices: {len(connected_devices)}")
+            return connected_devices
 
         except Exception as e:
             self.logger.error(f"Error getting connected devices: {e}")
