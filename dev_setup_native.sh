@@ -1,95 +1,121 @@
 #!/bin/bash
 
 # Colors for output
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
-# Function to list available interfaces
-list_interfaces() {
-    echo -e "\nAvailable network interfaces:"
-    ip link show | grep -E '^[0-9]+: ' | cut -d: -f2 | awk '{print $1}'
-}
-
-# Function to validate interface exists
-validate_interface() {
-    ip link show "$1" >/dev/null 2>&1
-    return $?
-}
-
-echo -e "${GREEN}Setting up PISO WIFI development environment...${NC}"
-
-# Check if script is run as root
+# Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Please run as root${NC}"
     exit 1
 fi
 
-# Install system dependencies
+# Function to check command existence
+check_command() {
+    if ! command -v $1 &> /dev/null; then
+        echo -e "${YELLOW}Installing $1...${NC}"
+        apt-get install -y $1
+    fi
+}
+
 echo -e "${GREEN}Installing system dependencies...${NC}"
 apt-get update
 apt-get install -y \
+    python3 \
     python3-pip \
-    python3-venv \
-    python3-dev \
-    libnl-3-dev \
-    libnl-genl-3-dev \
-    libssl-dev \
+    hostapd \
+    dnsmasq \
+    iptables \
+    iw \
+    rfkill \
     net-tools \
     wireless-tools \
-    sqlite3 \
-    rfkill \
+    bridge-utils \
+    iproute2 \
+    tc \
+    arping \
     build-essential \
-    pkg-config \
-    dnsmasq \
-    hostapd \
-    linux-headers-$(uname -r) \
-    conntrack
+    python3-dev \
+    libffi-dev \
+    libssl-dev
+
+# Install tc (traffic control) if not present
+check_command tc
+
+# Stop services that might interfere
+systemctl stop NetworkManager
+systemctl stop wpa_supplicant
+systemctl stop systemd-resolved
+systemctl disable systemd-resolved
+
+# Backup existing configurations
+echo -e "${GREEN}Backing up existing configurations...${NC}"
+timestamp=$(date +%Y%m%d_%H%M%S)
+[ -f /etc/hostapd/hostapd.conf ] && cp /etc/hostapd/hostapd.conf /etc/hostapd/hostapd.conf.backup_$timestamp
+[ -f /etc/dnsmasq.conf ] && cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup_$timestamp
+[ -f /etc/sysctl.conf ] && cp /etc/sysctl.conf /etc/sysctl.conf.backup_$timestamp
+
+# Configure system settings
+echo -e "${GREEN}Configuring system settings...${NC}"
+# Enable IP forwarding
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
+
+# Configure iptables defaults
+iptables -F
+iptables -t nat -F
+iptables -t mangle -F
+iptables -X
+
+# Save iptables rules
+iptables-save > /etc/iptables.rules
+echo -e "${GREEN}Saved default iptables rules${NC}"
+
+# Create necessary directories
+mkdir -p /etc/hostapd
+mkdir -p /var/run/hostapd
+mkdir -p logs
+mkdir -p config
+
+# Set proper permissions
+chmod 755 /etc/hostapd
+chmod 755 /var/run/hostapd
+
+# Get available interfaces
+echo -e "${GREEN}Available network interfaces:${NC}"
+ip link show | grep -v "lo:" | grep -v "docker" | awk -F: '{print $2}' | tr -d ' '
 
 # Select interfaces
-list_interfaces
-echo -e "\n${YELLOW}Select interfaces for setup:${NC}"
+read -p "Enter the interface for Internet connection: " INTERNET_IFACE
+read -p "Enter the interface for WiFi hotspot: " WIFI_IFACE
 
-# Internet interface selection
-while true; do
-    read -p "Enter the interface for internet connection (e.g., eth0): " INTERNET_IFACE
-    if validate_interface "$INTERNET_IFACE"; then
-        break
-    else
-        echo -e "${RED}Invalid interface. Please select from the list above.${NC}"
-    fi
-done
+# Verify interfaces exist
+if ! ip link show $INTERNET_IFACE &> /dev/null; then
+    echo -e "${RED}Internet interface $INTERNET_IFACE not found${NC}"
+    exit 1
+fi
 
-# WiFi interface selection
-while true; do
-    read -p "Enter the interface for WiFi hotspot (e.g., wlan0): " WIFI_IFACE
-    if validate_interface "$WIFI_IFACE"; then
-        if [ "$WIFI_IFACE" != "$INTERNET_IFACE" ]; then
-            break
-        else
-            echo -e "${RED}Please select a different interface for WiFi hotspot.${NC}"
-        fi
-    else
-        echo -e "${RED}Invalid interface. Please select from the list above.${NC}"
-    fi
-done
+if ! ip link show $WIFI_IFACE &> /dev/null; then
+    echo -e "${RED}WiFi interface $WIFI_IFACE not found${NC}"
+    exit 1
+fi
 
-# Create project structure
-echo -e "${GREEN}Creating project directories...${NC}"
-mkdir -p config logs
-
-# Create Python virtual environment
-echo -e "${GREEN}Creating Python virtual environment...${NC}"
-python3 -m venv venv
-source venv/bin/activate
-
-# Install development dependencies
+# Install Python dependencies
 echo -e "${GREEN}Installing Python dependencies...${NC}"
-pip install --upgrade pip
-pip install wireless netifaces psutil
-pip install PyAccessPoint==0.2.5
-pip install -r requirements.txt
+pip3 install --upgrade pip
+pip3 install \
+    wireless \
+    netifaces \
+    psutil \
+    flask \
+    flask-login \
+    python-dotenv \
+    requests \
+    pyroute2 \
+    netfilterqueue \
+    scapy
 
 # Save interface selections
 echo -e "${GREEN}Saving interface configurations...${NC}"
@@ -113,25 +139,58 @@ DHCP_RANGE_START=192.168.4.2
 DHCP_RANGE_END=192.168.4.20
 NETWORK_MASK=255.255.255.0
 AP_IP=192.168.4.1
+SECRET_KEY=$(openssl rand -hex 32)
+EOF
+
+# Create startup script
+cat > /etc/systemd/system/pisowifi.service << EOF
+[Unit]
+Description=PisoWiFi Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$(pwd)
+Environment=PYTHONPATH=$(pwd)
+ExecStart=/usr/bin/python3 $(pwd)/main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
 # Initialize the database
 mkdir -p config
 touch config/piso_wifi.db
 
-echo -e "${GREEN}Starting PISO WIFI application...${NC}"
+# Set proper permissions
+chown -R $SUDO_USER:$SUDO_USER .
+chmod -R 755 .
+chmod 644 .env
+chmod 644 config/piso_wifi.db
+
+# Enable the service
+systemctl daemon-reload
+systemctl enable pisowifi.service
+
+echo -e "${GREEN}Setup completed successfully!${NC}"
 echo -e "\nSelected interfaces:"
 echo -e "Internet: ${YELLOW}${INTERNET_IFACE}${NC}"
 echo -e "WiFi Hotspot: ${YELLOW}${WIFI_IFACE}${NC}"
-echo -e "\nAccess Points:"
+echo -e "\nAccess Point:"
 echo -e "SSID: PisoWiFi"
 echo -e "Password: pisowifi123"
 echo -e "\nAdmin Interface:"
 echo -e "URL: http://192.168.4.1:5000"
 echo -e "Username: admin"
 echo -e "Password: admin123"
-echo -e "\nTo clean up and restore network settings later:"
+echo -e "\nTo start the service:"
+echo -e "   ${YELLOW}sudo systemctl start pisowifi${NC}"
+echo -e "\nTo check service status:"
+echo -e "   ${YELLOW}sudo systemctl status pisowifi${NC}"
+echo -e "\nTo view logs:"
+echo -e "   ${YELLOW}sudo journalctl -u pisowifi -f${NC}"
+echo -e "\nTo clean up and restore network settings:"
 echo -e "   ${YELLOW}sudo ./cleanup_hotspot.sh${NC}"
-
-# Start the Flask application
-python main.py
